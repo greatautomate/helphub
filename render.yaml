@@ -11,9 +11,6 @@ services:
         value: 3.11.6
       - key: PYTHONUNBUFFERED
         value: 1
-    scaling:
-      minInstances: 1
-      maxInstances: 1
     disk:
       name: bot-data
       mountPath: /app/data
