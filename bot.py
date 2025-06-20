@@ -188,7 +188,6 @@ def process_cc(ccc):
             message = 'Unknown response'
             filename = 'unknown.txt'
 
-        # Thread-safe file writing
         try:
             with file_lock:
                 with open(filename, "a") as f:
@@ -446,8 +445,13 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 def signal_handler(signum, frame):
     logger.info(f"Received signal {signum}. Shutting down gracefully...")
     if app:
-        asyncio.create_task(app.stop())
-        asyncio.create_task(app.shutdown())
+        try:
+            loop = asyncio.get_event_loop()
+            if not loop.is_closed():
+                loop.create_task(app.stop())
+                loop.create_task(app.shutdown())
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
     sys.exit(0)
 
 async def main():
@@ -480,7 +484,7 @@ async def main():
         logger.info("Bot started with polling...")
         await app.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,  # Prevent conflicts on restart
+            drop_pending_updates=True,
             close_loop=False
         )
 
@@ -488,5 +492,20 @@ async def main():
         logger.error(f"Error starting bot: {e}")
         sys.exit(1)
 
+# FIXED: Handle existing event loop
+def run_bot():
+    try:
+        # Try to get existing event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is already running, create task
+            loop.create_task(main())
+        else:
+            # If no loop or not running, use asyncio.run
+            loop.run_until_complete(main())
+    except RuntimeError:
+        # No event loop exists, create new one
+        asyncio.run(main())
+
 if __name__ == '__main__':
-    asyncio.run(main())
+    run_bot()
