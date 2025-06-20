@@ -454,7 +454,7 @@ def signal_handler(signum, frame):
             logger.error(f"Error during shutdown: {e}")
     sys.exit(0)
 
-async def main():
+def main():
     global app
 
     logger.info("Starting Stripe Card Checker Bot...")
@@ -482,30 +482,31 @@ async def main():
 
         # Start the bot with polling
         logger.info("Bot started with polling...")
-        await app.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
-            close_loop=False
-        )
+
+        # Check if there's already a running event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # If we get here, there's already a running loop
+            # Create a task in the existing loop
+            loop.create_task(app.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                close_loop=False
+            ))
+            # Keep the main thread alive
+            while True:
+                time.sleep(1)
+        except RuntimeError:
+            # No running loop, we can use asyncio.run()
+            asyncio.run(app.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                close_loop=False
+            ))
 
     except Exception as e:
         logger.error(f"Error starting bot: {e}")
         sys.exit(1)
 
-# FIXED: Handle existing event loop
-def run_bot():
-    try:
-        # Try to get existing event loop
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If loop is already running, create task
-            loop.create_task(main())
-        else:
-            # If no loop or not running, use asyncio.run
-            loop.run_until_complete(main())
-    except RuntimeError:
-        # No event loop exists, create new one
-        asyncio.run(main())
-
 if __name__ == '__main__':
-    run_bot()
+    main()
