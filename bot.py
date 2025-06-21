@@ -318,7 +318,6 @@ Commands:
 /start - Show this help message
 /chk <card> - Check a single card
 /mass <cards> - Check multiple cards using threading
-#/bulk - Process all cards from db.txt
 /stats - Show processing statistics
 
 Send me a card in the format: 1234567890123456|12|25|123
