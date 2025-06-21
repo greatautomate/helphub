@@ -306,7 +306,7 @@ def process_cc(ccc):
             timer = round(time.time() - start_time, 1)
             return {
                 'status': 'DECLINED',
-                'message': "Payment method creation failed",
+                'message': f"Payment method creation failed",
                 'card': ccc,
                 'time': timer
             }
@@ -316,7 +316,7 @@ def process_cc(ccc):
             timer = round(time.time() - start_time, 1)
             return {
                 'status': 'DECLINED',
-                'message': "Setup intent creation failed",
+                'message': f"Setup intent creation failed",
                 'card': ccc,
                 'time': timer
             }
@@ -328,7 +328,7 @@ def process_cc(ccc):
                 timer = round(time.time() - start_time, 1)
                 return {
                     'status': 'APPROVED',
-                    'message': "Card successfully verified",
+                    'message': f"Card successfully verified",
                     'card': ccc,
                     'time': timer
                 }
@@ -346,7 +346,7 @@ def process_cc(ccc):
         timer = round(time.time() - start_time, 1)
         return {
             'status': 'DECLINED',
-            'message': "General processing failure",
+            'message': f"General processing failure",
             'card': ccc,
             'time': timer
         }
@@ -360,8 +360,51 @@ def process_cc(ccc):
             'time': timer
         }
 
-async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process multiple cards at once and log the results"""
+# Your existing command handlers
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Welcome! Send /help to see available commands.")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = """
+Available commands:
+/check <card> - Check a single card
+/mass - Check multiple cards (reply to a message with cards)
+/help - Show this help message
+"""
+    await update.message.reply_text(help_text)
+
+async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Please provide a card to check.")
+        return
+
+    card = context.args[0]
+    user_info = {
+        'id': update.effective_user.id,
+        'name': update.effective_user.full_name,
+        'username': update.effective_user.username
+    }
+
+    await update.message.reply_text(f"Checking card: {card}")
+
+    try:
+        result = process_cc(card)
+
+        # Log the result
+        await log_card_processing(card, result, user_info, context.bot)
+
+        # Format response based on status
+        if result['status'] == 'APPROVED':
+            response = f"✅ APPROVED: {result['message']}\n⏱️ Time: {result['time']}s"
+        else:
+            response = f"❌ DECLINED: {result['message']}\n⏱️ Time: {result['time']}s"
+
+        await update.message.reply_text(response)
+
+    except Exception as e:
+        await update.message.reply_text(f"Error: {str(e)}")
+
+async def mass_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_info = {
         'id': user.id,
@@ -370,15 +413,12 @@ async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     # Check if the user provided cards
-    if not context.args and not update.message.reply_to_message:
-        await update.message.reply_text("Please provide cards or reply to a message containing cards.")
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Please reply to a message containing cards.")
         return
 
-    # Get cards from args or replied message
-    if context.args:
-        cards_text = ' '.join(context.args)
-    else:
-        cards_text = update.message.reply_to_message.text
+    # Get cards from replied message
+    cards_text = update.message.reply_to_message.text
 
     # Split into individual cards
     cards = [card.strip() for card in cards_text.split('\n') if card.strip()]
@@ -440,39 +480,23 @@ async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⚠️ Errors: {len(error_cards)}"
     )
 
-# Initialize and run the bot
 async def main():
-    global app
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Initialize the Application
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    # Command handlers
-    app.add_handler(CommandHandler("mass", cmd_mass))
+    # Add handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("check", check_card))
+    application.add_handler(CommandHandler("mass", mass_check))
 
-    # Add other command handlers as needed...
+    # Start the Bot
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
 
-    # Start the bot
-    await app.start()
-    logger.info("Bot started")
-
-    # Run the bot until user interrupts
-    await app.updater.start_polling()
-
-    # Keep the bot running
-    try:
-        await asyncio.Future()
-    finally:
-        await app.stop()
-
-# Graceful shutdown handler
-def signal_handler(sig, frame):
-    logger.info("Received signal to terminate. Shutting down gracefully...")
-    if app:
-        asyncio.run(app.stop())
-    sys.exit(0)
-
-# Register signal handlers
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+    # Run the bot until the user presses Ctrl-C
+    await application.idle()
 
 if __name__ == "__main__":
     asyncio.run(main())
